@@ -10,6 +10,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+
+// ABSOLUTE TOP TEST
+app.get('/health', (req, res) => res.json({ status: 'ok', server: 'NodeJS', time: new Date() }));
+
 app.use(cors());
 app.use(express.json());
 
@@ -18,9 +22,6 @@ const MONGO_URI = 'mongodb://mongo:gOvpEUyQmhOMmddioVtdHlNCSPWyxhzh@turntable.pr
 mongoose.connect(MONGO_URI)
     .then(() => console.log('[SERVER] Connected to MongoDB'))
     .catch(err => console.error('[SERVER] Connection Error:', err));
-
-// Test Endpoint
-app.get('/health', (req, res) => res.json({ status: 'ok', time: new Date() }));
 
 // Auth Endpoints
 app.get('/api/auth/check', async (req, res) => {
