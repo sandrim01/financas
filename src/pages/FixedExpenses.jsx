@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Trash2, CalendarClock, CreditCard, Pencil } from 'lucide-react';
+import { api } from '../services/api';
 
 export function FixedExpenses({ user }) {
     const [expenses, setExpenses] = useState([]);
@@ -9,12 +10,10 @@ export function FixedExpenses({ user }) {
     const [formData, setFormData] = useState({ name: '', amount: '', day: '1', category: '' });
 
     const load = async () => {
-        if (window.api) {
-            const data = await window.api.getFixedExpenses(user.id);
-            setExpenses(data);
-            const status = await window.api.getMonthlyStatus(user.id);
-            setStatusMap(status);
-        }
+        const data = await api.getFixedExpenses(user.id);
+        setExpenses(data);
+        const status = await api.getMonthlyStatus(user.id);
+        setStatusMap(status);
     };
 
     useEffect(() => {
@@ -40,43 +39,35 @@ export function FixedExpenses({ user }) {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (window.api) {
-            if (editingId) {
-                await window.api.updateFixedExpense(user.id, { ...formData, id: editingId });
-            } else {
-                await window.api.addFixedExpense(user.id, formData);
-            }
-            cancelEdit();
-            load();
+        if (editingId) {
+            await api.updateFixedExpense(user.id, { ...formData, id: editingId });
+        } else {
+            await api.addFixedExpense(user.id, formData);
         }
+        cancelEdit();
+        load();
     };
 
     const handleDelete = async (id) => {
         if (window.confirm("Remover despesa fixa?")) {
-            if (window.api) {
-                await window.api.deleteFixedExpense(user.id, id);
-                load();
-            }
+            await api.deleteFixedExpense(user.id, id);
+            load();
         }
     };
 
     const handleRegister = async (expense) => {
-        if (window.api) {
-            const success = await window.api.registerFixedExpense(user.id, expense);
-            if (success) {
-                load(); // Refresh status
-            } else {
-                alert("Esta despesa já foi registrada neste mês.");
-            }
+        const success = await api.registerFixedExpense(user.id, expense);
+        if (success) {
+            load(); // Refresh status
+        } else {
+            alert("Esta despesa já foi registrada neste mês.");
         }
     };
 
     const handleUnregister = async (expenseId) => {
         if (window.confirm("Deseja estornar/remover o lançamento deste mês? (Isso apagará a transação criada)")) {
-            if (window.api && window.api.unregisterFixedExpense) {
-                await window.api.unregisterFixedExpense(user.id, expenseId);
-                load();
-            }
+            await api.unregisterFixedExpense(user.id, expenseId);
+            load();
         }
     };
 

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Trash2, Target, Trophy, TrendingUp } from 'lucide-react';
+import { api } from '../services/api';
 
 export function Goals({ user }) {
     const [goals, setGoals] = useState([]);
@@ -10,10 +11,8 @@ export function Goals({ user }) {
     const [formData, setFormData] = useState({ name: '', targetAmount: '', deadline: '' });
 
     const load = async () => {
-        if (window.api) {
-            const data = await window.api.getGoals(user.id);
-            setGoals(data);
-        }
+        const data = await api.getGoals(user.id);
+        setGoals(data);
     };
 
     useEffect(() => {
@@ -22,20 +21,16 @@ export function Goals({ user }) {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (window.api) {
-            await window.api.addGoal(user.id, formData);
-            setFormVisible(false);
-            setFormData({ name: '', targetAmount: '', deadline: '' });
-            load();
-        }
+        await api.addGoal(user.id, formData);
+        setFormVisible(false);
+        setFormData({ name: '', targetAmount: '', deadline: '' });
+        load();
     };
 
     const handleDelete = async (id) => {
         if (window.confirm("Remover meta?")) {
-            if (window.api) {
-                await window.api.deleteGoal(user.id, id);
-                load();
-            }
+            await api.deleteGoal(user.id, id);
+            load();
         }
     };
 
@@ -50,14 +45,12 @@ export function Goals({ user }) {
         if (!selectedGoal || !fundAmount) return;
 
         const newAmount = Number(selectedGoal.currentAmount) + Number(fundAmount);
-        if (window.api) {
-            await window.api.updateGoal(user.id, selectedGoal.id, newAmount);
-            // Optionally add a transaction for this?
-            // await window.api.addTransaction({ title: `Depósito Meta: ${selectedGoal.name}`, amount: -Number(fundAmount), type: 'expense', category: 'Investimento/Meta', date: new Date().toISOString() });
+        await api.updateGoal(user.id, selectedGoal.id, newAmount);
+        // Optionally add a transaction for this?
+        // await api.addTransaction({ title: `Depósito Meta: ${selectedGoal.name}`, amount: -Number(fundAmount), type: 'expense', category: 'Investimento/Meta', date: new Date().toISOString() });
 
-            setAddFundVisible(false);
-            load();
-        }
+        setAddFundVisible(false);
+        load();
     };
 
     return (

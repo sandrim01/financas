@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Trash2, TrendingUp, PiggyBank, Briefcase, Landmark, Shield, Pencil } from 'lucide-react';
+import { api } from '../services/api';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
 export function Investments({ user }) {
@@ -14,10 +15,8 @@ export function Investments({ user }) {
     });
 
     const load = async () => {
-        if (window.api) {
-            const data = await window.api.getInvestments(user.id);
-            setInvestments(data);
-        }
+        const data = await api.getInvestments(user.id);
+        setInvestments(data);
     };
 
     useEffect(() => {
@@ -26,17 +25,15 @@ export function Investments({ user }) {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (window.api) {
-            if (editingId) {
-                await window.api.updateInvestment(user.id, { ...formData, id: editingId });
-            } else {
-                await window.api.addInvestment(user.id, formData);
-            }
-            setFormVisible(false);
-            setEditingId(null);
-            setFormData({ name: '', amount: '', type: 'Poupanca', monthlyRate: '0.5' });
-            load();
+        if (editingId) {
+            await api.updateInvestment(user.id, { ...formData, id: editingId });
+        } else {
+            await api.addInvestment(user.id, formData);
         }
+        setFormVisible(false);
+        setEditingId(null);
+        setFormData({ name: '', amount: '', type: 'Poupanca', monthlyRate: '0.5' });
+        load();
     };
 
     const handleEdit = (item) => {
@@ -52,10 +49,8 @@ export function Investments({ user }) {
 
     const handleDelete = async (id) => {
         if (window.confirm("Remover investimento?")) {
-            if (window.api) {
-                await window.api.deleteInvestment(user.id, id);
-                load();
-            }
+            await api.deleteInvestment(user.id, id);
+            load();
         }
     };
 

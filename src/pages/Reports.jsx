@@ -1,16 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend } from 'recharts';
 import { PieChart as PieIcon, TrendingDown } from 'lucide-react';
+import { api } from '../services/api';
 
 export function Reports({ user }) {
     const [transactions, setTransactions] = useState([]);
 
     useEffect(() => {
         const load = async () => {
-            if (window.api) {
-                const data = await window.api.getTransactions(user.id);
-                setTransactions(data);
-            }
+            const data = await api.getTransactions(user.id);
+            setTransactions(data);
         };
         load();
     }, [user.id]);

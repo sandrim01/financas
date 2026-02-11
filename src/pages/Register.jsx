@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { User, Mail, Lock, ArrowRight, Loader2, Phone } from 'lucide-react';
+import { api } from '../services/api';
 
 export function Register({ onLogin }) {
     const [name, setName] = useState('');
@@ -23,22 +24,17 @@ export function Register({ onLogin }) {
             return;
         }
 
-        if (window.api) {
-            try {
-                const result = await window.api.register({ name, email, phone, password });
-                if (result.success) {
-                    localStorage.setItem('last_user_email', email); // Save for biometric
-                    onLogin(result.user);
-                    navigate('/'); // Auto login
-                } else {
-                    setError(result.message);
-                }
-            } catch (err) {
-                setError('Erro ao registrar.');
+        try {
+            const result = await api.registerUser({ name, email, phone, password });
+            if (result.success) {
+                localStorage.setItem('last_user_email', email); // Save for biometric
+                onLogin(result.user);
+                navigate('/'); // Auto login
+            } else {
+                setError(result.message);
             }
-        } else {
-            // Mock
-            setError('Instale o aplicativo Electron.');
+        } catch (err) {
+            setError('Erro ao registrar.');
         }
         setLoading(false);
     };

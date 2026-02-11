@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Trash2, CalendarClock, TrendingUp, Pencil } from 'lucide-react';
+import { api } from '../services/api';
 
 export function FixedIncome({ user }) {
     const [income, setIncome] = useState([]);
@@ -9,12 +10,10 @@ export function FixedIncome({ user }) {
     const [formData, setFormData] = useState({ name: '', amount: '', day: '1', category: '' });
 
     const load = async () => {
-        if (window.api) {
-            const data = await window.api.getFixedIncome(user.id);
-            setIncome(data);
-            const status = await window.api.getMonthlyStatus(user.id);
-            setStatusMap(status);
-        }
+        const data = await api.getFixedIncome(user.id);
+        setIncome(data);
+        const status = await api.getMonthlyStatus(user.id);
+        setStatusMap(status);
     };
 
     useEffect(() => {
@@ -40,43 +39,35 @@ export function FixedIncome({ user }) {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (window.api) {
-            if (editingId) {
-                await window.api.updateFixedIncome(user.id, { ...formData, id: editingId });
-            } else {
-                await window.api.addFixedIncome(user.id, formData);
-            }
-            cancelEdit();
-            load();
+        if (editingId) {
+            await api.updateFixedIncome(user.id, { ...formData, id: editingId });
+        } else {
+            await api.addFixedIncome(user.id, formData);
         }
+        cancelEdit();
+        load();
     };
 
     const handleDelete = async (id) => {
         if (window.confirm("Remover renda fixa?")) {
-            if (window.api) {
-                await window.api.deleteFixedIncome(user.id, id);
-                load();
-            }
+            await api.deleteFixedIncome(user.id, id);
+            load();
         }
     };
 
     const handleRegister = async (item) => {
-        if (window.api) {
-            const success = await window.api.registerFixedIncome(user.id, item);
-            if (success) {
-                load();
-            } else {
-                alert("Este rendimento já foi registrado neste mês.");
-            }
+        const success = await api.registerFixedIncome(user.id, item);
+        if (success) {
+            load();
+        } else {
+            alert("Este rendimento já foi registrado neste mês.");
         }
     };
 
     const handleUnregister = async (itemId) => {
         if (window.confirm("Deseja estornar/remover o lançamento deste mês? (Isso apagará a transação criada)")) {
-            if (window.api && window.api.unregisterFixedIncome) {
-                await window.api.unregisterFixedIncome(user.id, itemId);
-                load();
-            }
+            await api.unregisterFixedIncome(user.id, itemId);
+            load();
         }
     };
 

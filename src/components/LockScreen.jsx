@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Lock, Fingerprint, KeyRound } from 'lucide-react';
+import { api } from '../services/api';
 
 export function LockScreen({ user, onUnlock }) {
     const [error, setError] = useState('');
@@ -13,17 +14,15 @@ export function LockScreen({ user, onUnlock }) {
             setLoading(true);
             setError('');
 
-            if (window.api) {
-                const result = await window.api.loginUser({
-                    email: user.email,
-                    password
-                });
+            const result = await api.loginUser({
+                email: user.email,
+                password
+            });
 
-                if (result.success) {
-                    onUnlock();
-                } else {
-                    setError('Senha incorreta.');
-                }
+            if (result.success) {
+                onUnlock();
+            } else {
+                setError('Senha incorreta.');
             }
         } catch (err) {
             console.error(err);

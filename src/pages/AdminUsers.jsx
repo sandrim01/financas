@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Shield, Lock, Trash2, Plus, Edit2, X, Save, AlertTriangle } from 'lucide-react';
+import { api } from '../services/api';
 
 export function AdminUsers({ user }) {
     const [verified, setVerified] = useState(false);
@@ -25,13 +26,11 @@ export function AdminUsers({ user }) {
         setError('');
         setLoading(true);
         try {
-            if (window.api) {
-                const isValid = await window.api.verifyAdminPassword(user.id, password);
-                if (isValid) {
-                    setVerified(true);
-                } else {
-                    setError('Senha incorreta ou acesso negado.');
-                }
+            const isValid = await api.verifyAdminPassword(user.id, password);
+            if (isValid) {
+                setVerified(true);
+            } else {
+                setError('Senha incorreta ou acesso negado.');
             }
         } catch (err) {
             setError('Erro ao verificar senha.');
@@ -41,18 +40,14 @@ export function AdminUsers({ user }) {
     };
 
     const loadUsers = async () => {
-        if (window.api) {
-            const data = await window.api.getAdminUsers(user.id);
-            setUsers(data);
-        }
+        const data = await api.getAdminUsers(user.id);
+        setUsers(data);
     };
 
     const handleDelete = async (userId) => {
         if (window.confirm('Tem certeza? Isso apagará TODOS os dados deste usuário permanentemente.')) {
-            if (window.api) {
-                await window.api.adminDeleteUser(userId);
-                loadUsers();
-            }
+            await api.adminDeleteUser(userId);
+            loadUsers();
         }
     };
 
@@ -74,23 +69,21 @@ export function AdminUsers({ user }) {
         setError('');
 
         try {
-            if (window.api) {
-                let res;
-                if (modalMode === 'create') {
-                    res = await window.api.adminCreateUser(formData);
-                } else {
-                    res = await window.api.adminUpdateUser({
-                        id: currentUser.id,
-                        ...formData
-                    });
-                }
+            let res;
+            if (modalMode === 'create') {
+                res = await api.adminCreateUser(formData);
+            } else {
+                res = await api.adminUpdateUser({
+                    id: currentUser.id,
+                    ...formData
+                });
+            }
 
-                if (res.success) {
-                    setShowModal(false);
-                    loadUsers();
-                } else {
-                    setError(res.message || 'Erro ao salvar.');
-                }
+            if (res.success) {
+                setShowModal(false);
+                loadUsers();
+            } else {
+                setError(res.message || 'Erro ao salvar.');
             }
         } catch (err) {
             setError('Erro ao processar solicitação.');

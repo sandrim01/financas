@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Trash2, Search, Filter, Pencil } from 'lucide-react';
+import { api } from '../services/api';
 
 export function Transactions({ user }) {
     const [transactions, setTransactions] = useState([]);
@@ -8,13 +9,11 @@ export function Transactions({ user }) {
     const [formData, setFormData] = useState({ title: '', amount: '', type: 'expense', category: '', date: new Date().toISOString().split('T')[0] });
 
     const load = async () => {
-        if (window.api) {
-            try {
-                const data = await window.api.getTransactions(user.id);
-                setTransactions(data.sort((a, b) => new Date(b.date) - new Date(a.date)));
-            } catch (error) {
-                console.error("Error loading transactions", error);
-            }
+        try {
+            const data = await api.getTransactions(user.id);
+            setTransactions(data.sort((a, b) => new Date(b.date) - new Date(a.date)));
+        } catch (error) {
+            console.error("Error loading transactions", error);
         }
     };
 
@@ -42,25 +41,19 @@ export function Transactions({ user }) {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (window.api) {
-            if (editingId) {
-                await window.api.updateTransaction(user.id, { ...formData, id: editingId });
-            } else {
-                await window.api.addTransaction(user.id, formData);
-            }
-            cancelEdit();
-            load();
+        if (editingId) {
+            await api.updateTransaction(user.id, { ...formData, id: editingId });
         } else {
-            alert("API not available in browser mode without Electron.");
+            await api.addTransaction(user.id, formData);
         }
+        cancelEdit();
+        load();
     };
 
     const handleDelete = async (id) => {
         if (window.confirm("Tem certeza que deseja excluir?")) {
-            if (window.api) {
-                await window.api.deleteTransaction(user.id, id);
-                load();
-            }
+            await api.deleteTransaction(user.id, id);
+            load();
         }
     };
 
