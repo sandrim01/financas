@@ -6,6 +6,21 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import Store from 'electron-store';
 import crypto from 'crypto';
+import mongoose from 'mongoose';
+import { User, Transaction, FixedExpense, FixedIncome, Goal, Investment } from './database/models.js';
+
+const MONGO_URI = 'mongodb://mongo:gOvpEUyQmhOMmddioVtdHlNCSPWyxhzh@turntable.proxy.rlwy.net:26312';
+
+// Connect to MongoDB
+const dbConnection = mongoose.connect(MONGO_URI)
+    .then(() => {
+        console.log('[DB] Connected to MongoDB Registry');
+        return true;
+    })
+    .catch(err => {
+        console.error('[DB] Connection Error:', err);
+        return false;
+    });
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -32,70 +47,22 @@ const getUserStore = (userId) => {
     });
 };
 
-// --- DATA MIGRATION LOGIC (Root -> User File) ---
-const performMigration = () => {
-    // Check if legacy data exists in the main authStore root
-    if (authStore.has('transactions') || authStore.has('goals')) {
-        console.log('[MIGRATION] Legacy root data found. Starting migration to secure user file...');
-
-        const users = authStore.get('users', []);
-        if (users.length > 0) {
-            const firstUser = users[0]; // Accounts created first own the data
-            console.log(`[MIGRATION] Target: ${firstUser.name} (${firstUser.id})`);
-
-            const userStore = getUserStore(firstUser.id);
-            const keysToMove = ['transactions', 'fixedExpenses', 'fixedIncome', 'goals', 'investments'];
-
-            keysToMove.forEach(key => {
-                if (authStore.has(key)) {
-                    console.log(`[MIGRATION] Moving ${key}...`);
-                    userStore.set(key, authStore.get(key));
-                    authStore.delete(key);
-                }
-            });
-            console.log('[MIGRATION] Success. Root is clean.');
-        }
-    }
-
-    // Check for "userData" nested object legacy (if the previous fix partial ran)
-    // If we have userData.123... keys in config.json, move them too.
-    const allConfig = authStore.store;
-    if (allConfig.userData) {
-        console.log('[MIGRATION] Found nested userData object. Splitting into files...');
-        Object.keys(allConfig.userData).forEach(uId => {
-            const uData = allConfig.userData[uId];
-            const uStore = getUserStore(uId);
-            uStore.set(uData); // Save all keys (transactions, etc) to file
-        });
-        authStore.delete('userData');
-        console.log('[MIGRATION] userData object migrated and removed.');
-    }
-};
-
-// Initialize
-if (!authStore.has('users')) {
-    authStore.set('users', []);
-}
-performMigration(); // Run on startup
-
-// --- NOTIFICATION SYSTEM ---
-const checkUpcomingExpenses = () => {
+// --- IPC HANDLERS ---
+const checkUpcomingExpenses = async () => {
     // Windows Notification Setup
     if (process.platform === 'win32') {
         app.setAppUserModelId('com.financas.app');
     }
     console.log('[NOTIFIER] Checking for upcoming expenses...');
-    const users = authStore.get('users', []);
-    const today = new Date();
-    const targetDate = new Date();
-    targetDate.setDate(today.getDate() + 5); // 5 days from now
-    const targetDay = targetDate.getDate();
+    try {
+        const users = await User.find({});
+        const today = new Date();
+        const targetDate = new Date();
+        targetDate.setDate(today.getDate() + 5); // 5 days from now
+        const targetDay = targetDate.getDate();
 
-    users.forEach(user => {
-
-        try {
-            const userStore = getUserStore(user.id);
-            const expenses = userStore.get('fixedExpenses', []);
+        for (const user of users) {
+            const expenses = await FixedExpense.find({ userId: user._id, active: true });
 
             expenses.forEach(expense => {
                 const expenseDay = parseInt(expense.day);
@@ -109,495 +76,469 @@ const checkUpcomingExpenses = () => {
                     // TODO: Integrate actual WhatsApp API here (Twilio, Z-API, or local bot)
                 }
             });
-        } catch (e) {
-            console.error(`[NOTIFIER] Error checking user ${user.id}:`, e);
         }
-    });
+    } catch (e) {
+        console.error('[NOTIFIER] Error checking expenses:', e);
+    }
 };
 
 // --- IPC HANDLERS ---
 
 // Auth
-ipcMain.handle('auth-check-users', () => {
-    const users = authStore.get('users', []);
-    return users.length > 0;
+ipcMain.handle('auth-check-users', async () => {
+    try {
+        await dbConnection;
+        const count = await User.countDocuments();
+        return count > 0;
+    } catch (e) { return false; }
 });
 
-ipcMain.handle('auth-register', (event, { name, email, password, phone }) => {
-    const users = authStore.get('users', []);
-    if (users.some(u => u.email === email)) {
-        return { success: false, message: 'Email já cadastrado.' };
+ipcMain.handle('auth-register', async (event, { name, email, password, phone }) => {
+    try {
+        const existing = await User.findOne({ email });
+        if (existing) {
+            return { success: false, message: 'Email já cadastrado.' };
+        }
+
+        const salt = crypto.randomBytes(16).toString('hex');
+        const hash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
+
+        const newUser = await User.create({
+            name,
+            email,
+            phone,
+            salt,
+            hash
+        });
+
+        console.log(`[AUTH] New user ${newUser.id} registered.`);
+        return { success: true, user: { id: newUser._id.toString(), name: newUser.name, email: newUser.email, phone: newUser.phone } };
+    } catch (e) {
+        return { success: false, message: 'Erro ao registrar usuário.' };
     }
-
-    const salt = crypto.randomBytes(16).toString('hex');
-    const hash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
-
-    const newUser = {
-        id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
-        name,
-        email,
-        phone, // New field
-        salt,
-        hash
-    };
-
-    authStore.set('users', [...users, newUser]);
-
-    // Initialize new user file
-    const newStore = getUserStore(newUser.id);
-    newStore.set({
-        transactions: [],
-        fixedExpenses: [],
-        fixedIncome: [],
-        goals: [],
-        investments: []
-    });
-
-    console.log(`[AUTH] New user ${newUser.id} registered and file created.`);
-    return { success: true, user: { id: newUser.id, name: newUser.name, email: newUser.email, phone: newUser.phone } };
 });
 
-ipcMain.handle('auth-login', (event, { email, password }) => {
-    const users = authStore.get('users', []);
-    const user = users.find(u => u.email === email);
+ipcMain.handle('auth-login', async (event, { email, password }) => {
+    try {
+        const user = await User.findOne({ email });
+        if (!user) return { success: false, message: 'Usuário não encontrado.' };
 
-    if (!user) return { success: false, message: 'Usuário não encontrado.' };
+        const hash = crypto.pbkdf2Sync(password, user.salt, 1000, 64, 'sha512').toString('hex');
 
-    const hash = crypto.pbkdf2Sync(password, user.salt, 1000, 64, 'sha512').toString('hex');
-
-    if (hash === user.hash) {
-        return { success: true, user: { id: user.id, name: user.name, email: user.email, phone: user.phone } };
-    } else {
-        return { success: false, message: 'Senha incorreta.' };
+        if (hash === user.hash) {
+            return { success: true, user: { id: user._id.toString(), name: user.name, email: user.email, phone: user.phone } };
+        } else {
+            return { success: false, message: 'Senha incorreta.' };
+        }
+    } catch (e) {
+        return { success: false, message: 'Erro ao realizar login.' };
     }
 });
 
 // Transactions
-ipcMain.handle('get-transactions', (event, userId) => {
+ipcMain.handle('get-transactions', async (event, userId) => {
     if (!userId) return [];
     try {
-        return getUserStore(userId).get('transactions', []);
+        const transactions = await Transaction.find({ userId }).sort({ date: -1 }).lean();
+        return transactions.map(t => ({ ...t, id: t._id.toString() }));
     } catch (e) { return []; }
 });
 
-ipcMain.handle('add-transaction', (event, { userId, transaction }) => {
+ipcMain.handle('add-transaction', async (event, { userId, transaction }) => {
     if (!userId) return [];
-    const store = getUserStore(userId);
-    const transactions = store.get('transactions', []);
-    const newTransactions = [{ ...transaction, id: Date.now().toString(), date: transaction.date || new Date().toISOString() }, ...transactions];
-    store.set('transactions', newTransactions);
-    return newTransactions;
+    try {
+        await Transaction.create({
+            ...transaction,
+            userId,
+            date: transaction.date || new Date().toISOString()
+        });
+        const transactions = await Transaction.find({ userId }).sort({ date: -1 }).lean();
+        return transactions.map(t => ({ ...t, id: t._id.toString() }));
+    } catch (e) { return []; }
 });
 
-ipcMain.handle('delete-transaction', (event, { userId, id }) => {
+ipcMain.handle('delete-transaction', async (event, { userId, id }) => {
     if (!userId) return [];
-    const store = getUserStore(userId);
-    const transactions = store.get('transactions', []);
-    const newTransactions = transactions.filter(t => t.id !== id);
-    store.set('transactions', newTransactions);
-    return newTransactions;
+    try {
+        await Transaction.deleteOne({ _id: id, userId });
+        const transactions = await Transaction.find({ userId }).sort({ date: -1 }).lean();
+        return transactions.map(t => ({ ...t, id: t._id.toString() }));
+    } catch (e) { return []; }
 });
 
-ipcMain.handle('update-transaction', (event, { userId, transaction }) => {
+ipcMain.handle('update-transaction', async (event, { userId, transaction }) => {
     if (!userId) return [];
-    const store = getUserStore(userId);
-    const transactions = store.get('transactions', []);
-    const index = transactions.findIndex(t => t.id === transaction.id);
-    if (index !== -1) {
-        transactions[index] = { ...transactions[index], ...transaction };
-        store.set('transactions', transactions);
-    }
-    return transactions;
+    try {
+        const { id, _id, ...data } = transaction;
+        await Transaction.updateOne({ _id: id || _id, userId }, { $set: data });
+        const transactions = await Transaction.find({ userId }).sort({ date: -1 }).lean();
+        return transactions.map(t => ({ ...t, id: t._id.toString() }));
+    } catch (e) { return []; }
 });
 
 // Monthly Status
-ipcMain.handle('get-monthly-status', (event, userId) => {
+ipcMain.handle('get-monthly-status', async (event, userId) => {
     if (!userId) return {};
-    const transactions = getUserStore(userId).get('transactions', []);
-    const now = new Date();
-    const currentMonth = now.getMonth();
-    const currentYear = now.getFullYear();
-    const status = {};
+    try {
+        const now = new Date();
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
 
-    transactions.forEach(t => {
-        const d = new Date(t.date);
-        if (d.getMonth() === currentMonth && d.getFullYear() === currentYear) {
+        const transactions = await Transaction.find({
+            userId,
+            date: { $gte: startOfMonth, $lte: endOfMonth }
+        });
+
+        const status = {};
+        transactions.forEach(t => {
             if (t.fixedExpenseId) status[t.fixedExpenseId] = true;
             if (t.fixedIncomeId) status[t.fixedIncomeId] = true;
-        }
-    });
-    return status;
+        });
+        return status;
+    } catch (e) { return {}; }
 });
 
 // Register Fixed Expense
-ipcMain.handle('register-fixed-expense', (event, { userId, expense }) => {
+ipcMain.handle('register-fixed-expense', async (event, { userId, expense }) => {
     if (!userId) return false;
-    const store = getUserStore(userId);
-    const transactions = store.get('transactions', []);
-    const now = new Date();
+    try {
+        const now = new Date();
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
 
-    const exists = transactions.some(t => {
-        if (t.fixedExpenseId !== expense.id) return false;
-        const d = new Date(t.date);
-        return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-    });
+        const exists = await Transaction.findOne({
+            userId,
+            fixedExpenseId: expense._id || expense.id,
+            date: { $gte: startOfMonth, $lte: endOfMonth }
+        });
 
-    if (exists) return false;
+        if (exists) return false;
 
-    const newTransaction = {
-        id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
-        title: expense.name,
-        amount: Math.abs(expense.amount),
-        type: 'expense',
-        category: expense.category || 'Despesas Fixas',
-        date: now.toISOString(),
-        fixedExpenseId: expense.id,
-        status: 'completed'
-    };
-    store.set('transactions', [newTransaction, ...transactions]);
-    return true;
+        await Transaction.create({
+            userId,
+            title: expense.name,
+            amount: Math.abs(expense.amount),
+            type: 'expense',
+            category: expense.category || 'Despesas Fixas',
+            date: now.toISOString(),
+            fixedExpenseId: expense._id || expense.id,
+            status: 'completed'
+        });
+        return true;
+    } catch (e) { return false; }
 });
 
 // Fixed Expenses
-ipcMain.handle('get-fixed-expenses', (event, userId) => {
+ipcMain.handle('get-fixed-expenses', async (event, userId) => {
     if (!userId) return [];
-    return getUserStore(userId).get('fixedExpenses', []);
+    try {
+        const list = await FixedExpense.find({ userId }).lean();
+        return list.map(item => ({ ...item, id: item._id.toString() }));
+    } catch (e) { return []; }
 });
 
-ipcMain.handle('add-fixed-expense', (event, { userId, expense }) => {
+ipcMain.handle('add-fixed-expense', async (event, { userId, expense }) => {
     if (!userId) return [];
-    const store = getUserStore(userId);
-    const list = store.get('fixedExpenses', []);
-    const newItem = { ...expense, id: Date.now().toString() };
-    store.set('fixedExpenses', [newItem, ...list]);
-    return [newItem, ...list];
+    try {
+        await FixedExpense.create({ ...expense, userId });
+        const list = await FixedExpense.find({ userId }).lean();
+        return list.map(item => ({ ...item, id: item._id.toString() }));
+    } catch (e) { return []; }
 });
 
-ipcMain.handle('update-fixed-expense', (event, { userId, expense }) => {
+ipcMain.handle('update-fixed-expense', async (event, { userId, expense }) => {
     if (!userId) return [];
-    const store = getUserStore(userId);
-    const list = store.get('fixedExpenses', []);
-    const index = list.findIndex(e => e.id === expense.id);
-    if (index !== -1) {
-        list[index] = { ...list[index], ...expense };
-        store.set('fixedExpenses', list);
-    }
-    return list;
+    try {
+        const { id, _id, ...data } = expense;
+        await FixedExpense.updateOne({ _id: id || _id, userId }, { $set: data });
+        const list = await FixedExpense.find({ userId }).lean();
+        return list.map(item => ({ ...item, id: item._id.toString() }));
+    } catch (e) { return []; }
 });
 
-ipcMain.handle('delete-fixed-expense', (event, { userId, id }) => {
+ipcMain.handle('delete-fixed-expense', async (event, { userId, id }) => {
     if (!userId) return [];
-    const store = getUserStore(userId);
-    const list = store.get('fixedExpenses', []);
-    const newList = list.filter(i => i.id !== id);
-    store.set('fixedExpenses', newList);
-    return newList;
+    try {
+        await FixedExpense.deleteOne({ _id: id, userId });
+        const list = await FixedExpense.find({ userId }).lean();
+        return list.map(item => ({ ...item, id: item._id.toString() }));
+    } catch (e) { return []; }
 });
 
 // Fixed Income
-ipcMain.handle('get-fixed-income', (event, userId) => {
+ipcMain.handle('get-fixed-income', async (event, userId) => {
     if (!userId) return [];
-    return getUserStore(userId).get('fixedIncome', []);
+    try {
+        const list = await FixedIncome.find({ userId }).lean();
+        return list.map(item => ({ ...item, id: item._id.toString() }));
+    } catch (e) { return []; }
 });
 
-ipcMain.handle('add-fixed-income', (event, { userId, income }) => {
+ipcMain.handle('add-fixed-income', async (event, { userId, income }) => {
     if (!userId) return [];
-    const store = getUserStore(userId);
-    const list = store.get('fixedIncome', []);
-    const newItem = { ...income, id: Date.now().toString() };
-    store.set('fixedIncome', [newItem, ...list]);
-    return [newItem, ...list];
+    try {
+        await FixedIncome.create({ ...income, userId });
+        const list = await FixedIncome.find({ userId }).lean();
+        return list.map(item => ({ ...item, id: item._id.toString() }));
+    } catch (e) { return []; }
 });
 
-ipcMain.handle('update-fixed-income', (event, { userId, income }) => {
+ipcMain.handle('update-fixed-income', async (event, { userId, income }) => {
     if (!userId) return [];
-    const store = getUserStore(userId);
-    const list = store.get('fixedIncome', []);
-    const index = list.findIndex(i => i.id === income.id);
-    if (index !== -1) {
-        list[index] = { ...list[index], ...income };
-        store.set('fixedIncome', list);
-    }
-    return list;
+    try {
+        const { id, _id, ...data } = income;
+        await FixedIncome.updateOne({ _id: id || _id, userId }, { $set: data });
+        const list = await FixedIncome.find({ userId }).lean();
+        return list.map(item => ({ ...item, id: item._id.toString() }));
+    } catch (e) { return []; }
 });
 
-ipcMain.handle('delete-fixed-income', (event, { userId, id }) => {
+ipcMain.handle('delete-fixed-income', async (event, { userId, id }) => {
     if (!userId) return [];
-    const store = getUserStore(userId);
-    const list = store.get('fixedIncome', []);
-    const newList = list.filter(i => i.id !== id);
-    store.set('fixedIncome', newList);
-    return newList;
+    try {
+        await FixedIncome.deleteOne({ _id: id, userId });
+        const list = await FixedIncome.find({ userId }).lean();
+        return list.map(item => ({ ...item, id: item._id.toString() }));
+    } catch (e) { return []; }
 });
 
 // Unregister Handlers (Undo)
-ipcMain.handle('unregister-fixed-expense', (event, { userId, id }) => {
+ipcMain.handle('unregister-fixed-expense', async (event, { userId, id }) => {
     if (!userId) return false;
-    const store = getUserStore(userId);
-    const transactions = store.get('transactions', []);
-    const now = new Date();
-    const newTransactions = transactions.filter(t => {
-        if (t.fixedExpenseId !== id) return true;
-        const d = new Date(t.date);
-        return !(d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear());
-    });
+    try {
+        const now = new Date();
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
 
-    if (newTransactions.length !== transactions.length) {
-        store.set('transactions', newTransactions);
-        return true;
-    }
-    return false;
+        const result = await Transaction.deleteOne({
+            userId,
+            fixedExpenseId: id,
+            date: { $gte: startOfMonth, $lte: endOfMonth }
+        });
+        return result.deletedCount > 0;
+    } catch (e) { return false; }
 });
 
-ipcMain.handle('unregister-fixed-income', (event, { userId, id }) => {
+ipcMain.handle('unregister-fixed-income', async (event, { userId, id }) => {
     if (!userId) return false;
-    const store = getUserStore(userId);
-    const transactions = store.get('transactions', []);
-    const now = new Date();
-    const newTransactions = transactions.filter(t => {
-        if (t.fixedIncomeId !== id) return true;
-        const d = new Date(t.date);
-        return !(d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear());
-    });
+    try {
+        const now = new Date();
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
 
-    if (newTransactions.length !== transactions.length) {
-        store.set('transactions', newTransactions);
-        return true;
-    }
-    return false;
+        const result = await Transaction.deleteOne({
+            userId,
+            fixedIncomeId: id,
+            date: { $gte: startOfMonth, $lte: endOfMonth }
+        });
+        return result.deletedCount > 0;
+    } catch (e) { return false; }
 });
 
-ipcMain.handle('register-fixed-income', (event, { userId, income }) => {
+ipcMain.handle('register-fixed-income', async (event, { userId, income }) => {
     if (!userId) return false;
-    const store = getUserStore(userId);
-    const transactions = store.get('transactions', []);
-    const now = new Date();
+    try {
+        const now = new Date();
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
 
-    const exists = transactions.some(t => {
-        if (t.fixedIncomeId !== income.id) return false;
-        const d = new Date(t.date);
-        return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-    });
+        const exists = await Transaction.findOne({
+            userId,
+            fixedIncomeId: income._id || income.id,
+            date: { $gte: startOfMonth, $lte: endOfMonth }
+        });
 
-    if (exists) return false;
+        if (exists) return false;
 
-    const newTransaction = {
-        id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
-        title: income.name,
-        amount: Math.abs(income.amount),
-        type: 'income',
-        category: income.category || 'Renda Fixa',
-        date: now.toISOString(),
-        fixedIncomeId: income.id,
-        status: 'completed'
-    };
-    store.set('transactions', [newTransaction, ...transactions]);
-    return true;
+        await Transaction.create({
+            userId,
+            title: income.name,
+            amount: Math.abs(income.amount),
+            type: 'income',
+            category: income.category || 'Renda Fixa',
+            date: now.toISOString(),
+            fixedIncomeId: income._id || income.id,
+            status: 'completed'
+        });
+        return true;
+    } catch (e) { return false; }
 });
 
 ipcMain.handle('check-fixed-expenses', () => false);
 ipcMain.handle('check-fixed-income', () => false);
 
 // Goals
-ipcMain.handle('get-goals', (event, userId) => {
+ipcMain.handle('get-goals', async (event, userId) => {
     if (!userId) return [];
-    return getUserStore(userId).get('goals', []);
+    try {
+        const list = await Goal.find({ userId }).lean();
+        return list.map(item => ({ ...item, id: item._id.toString() }));
+    } catch (e) { return []; }
 });
 
-ipcMain.handle('add-goal', (event, { userId, goal }) => {
+ipcMain.handle('add-goal', async (event, { userId, goal }) => {
     if (!userId) return [];
-    const store = getUserStore(userId);
-    const list = store.get('goals', []);
-    const newItem = { ...goal, id: Date.now().toString(), currentAmount: 0 };
-    store.set('goals', [newItem, ...list]);
-    return [newItem, ...list];
+    try {
+        await Goal.create({ ...goal, userId, currentAmount: 0 });
+        const list = await Goal.find({ userId }).lean();
+        return list.map(item => ({ ...item, id: item._id.toString() }));
+    } catch (e) { return []; }
 });
 
-ipcMain.handle('update-goal', (event, { userId, id, amount }) => {
+ipcMain.handle('update-goal', async (event, { userId, id, amount }) => {
     if (!userId) return [];
-    const store = getUserStore(userId);
-    const list = store.get('goals', []);
-    const index = list.findIndex(g => g.id === id);
-    if (index !== -1) {
-        list[index].currentAmount = Number(amount);
-        store.set('goals', list);
-    }
-    return list;
+    try {
+        await Goal.updateOne({ _id: id, userId }, { $set: { currentAmount: Number(amount) } });
+        const list = await Goal.find({ userId }).lean();
+        return list.map(item => ({ ...item, id: item._id.toString() }));
+    } catch (e) { return []; }
 });
 
-ipcMain.handle('delete-goal', (event, { userId, id }) => {
+ipcMain.handle('delete-goal', async (event, { userId, id }) => {
     if (!userId) return [];
-    const store = getUserStore(userId);
-    const list = store.get('goals', []);
-    const newList = list.filter(i => i.id !== id);
-    store.set('goals', newList);
-    return newList;
+    try {
+        await Goal.deleteOne({ _id: id, userId });
+        const list = await Goal.find({ userId }).lean();
+        return list.map(item => ({ ...item, id: item._id.toString() }));
+    } catch (e) { return []; }
 });
 
 // Investments
-ipcMain.handle('get-investments', (event, userId) => {
+ipcMain.handle('get-investments', async (event, userId) => {
     if (!userId) return [];
-    return getUserStore(userId).get('investments', []);
+    try {
+        const list = await Investment.find({ userId }).sort({ createdAt: -1 }).lean();
+        return list.map(item => ({ ...item, id: item._id.toString() }));
+    } catch (e) { return []; }
 });
 
-ipcMain.handle('add-investment', (event, { userId, investment }) => {
+ipcMain.handle('add-investment', async (event, { userId, investment }) => {
     if (!userId) return [];
-    const store = getUserStore(userId);
-    const list = store.get('investments', []);
-    const newItem = {
-        ...investment,
-        id: Date.now().toString(),
-        createdAt: new Date().toISOString(),
-        history: [{ date: new Date().toISOString(), value: investment.amount }]
-    };
-    store.set('investments', [newItem, ...list]);
-    return [newItem, ...list];
+    try {
+        await Investment.create({
+            ...investment,
+            userId,
+            createdAt: new Date().toISOString(),
+            history: [{ date: new Date().toISOString(), value: investment.amount }]
+        });
+        const list = await Investment.find({ userId }).sort({ createdAt: -1 }).lean();
+        return list.map(item => ({ ...item, id: item._id.toString() }));
+    } catch (e) { return []; }
 });
 
-ipcMain.handle('update-investment', (event, { userId, investment }) => {
+ipcMain.handle('update-investment', async (event, { userId, investment }) => {
     if (!userId) return [];
-    const store = getUserStore(userId);
-    const list = store.get('investments', []);
-    const index = list.findIndex(i => i.id === investment.id);
-    if (index !== -1) {
-        list[index] = { ...list[index], ...investment };
-        store.set('investments', list);
-    }
-    return list;
+    try {
+        const { id, _id, ...data } = investment;
+        await Investment.updateOne({ _id: id || _id, userId }, { $set: data });
+        const list = await Investment.find({ userId }).sort({ createdAt: -1 }).lean();
+        return list.map(item => ({ ...item, id: item._id.toString() }));
+    } catch (e) { return []; }
 });
 
-ipcMain.handle('delete-investment', (event, { userId, id }) => {
+ipcMain.handle('delete-investment', async (event, { userId, id }) => {
     if (!userId) return [];
-    const store = getUserStore(userId);
-    const list = store.get('investments', []);
-    const newList = list.filter(i => i.id !== id);
-    store.set('investments', newList);
-    return newList;
+    try {
+        await Investment.deleteOne({ _id: id, userId });
+        const list = await Investment.find({ userId }).sort({ createdAt: -1 }).lean();
+        return list.map(item => ({ ...item, id: item._id.toString() }));
+    } catch (e) { return []; }
 });
 
 // --- IPC HANDLERS - ADMIN ---
 
 // Verify password for Admin Access
-ipcMain.handle('admin-verify-password', (event, { userId, password }) => {
-    const users = authStore.get('users', []);
-    const user = users.find(u => u.id === userId);
+ipcMain.handle('admin-verify-password', async (event, { userId, password }) => {
+    try {
+        const user = await User.findById(userId);
+        if (!user) return false;
 
-    if (!user) return false;
+        // Hardcoded Admin Check for Alessandro
+        const admins = ['aless0791naval@gmail.com'];
+        if (!admins.includes(user.email)) {
+            return false; // Not an admin
+        }
 
-    // Hardcoded Admin Check for Alessandro
-    const admins = ['aless0791naval@gmail.com'];
-    if (!admins.includes(user.email)) {
-        return false; // Not an admin
-    }
-
-    const hash = crypto.pbkdf2Sync(password, user.salt, 1000, 64, 'sha512').toString('hex');
-    return hash === user.hash;
+        const hash = crypto.pbkdf2Sync(password, user.salt, 1000, 64, 'sha512').toString('hex');
+        return hash === user.hash;
+    } catch (e) { return false; }
 });
 
 // Get all users
-ipcMain.handle('admin-get-users', (event, requesterId) => {
-    // Verify valid admin request could be added here, but frontend gates it mostly. 
-    // Ideally we check if requesterId is admin.
-    const users = authStore.get('users', []);
-    return users.map(u => ({ id: u.id, name: u.name, email: u.email, phone: u.phone }));
+ipcMain.handle('admin-get-users', async (event, requesterId) => {
+    try {
+        const users = await User.find({});
+        return users.map(u => ({ id: u._id.toString(), name: u.name, email: u.email, phone: u.phone }));
+    } catch (e) { return []; }
 });
 
 // Login with Biometrics (Trust Client)
-ipcMain.handle('auth-login-biometric', (event, email) => {
-    const users = authStore.get('users', []);
-    const user = users.find(u => u.email === email);
-
-    if (user) {
-        return { success: true, user: { id: user.id, name: user.name, email: user.email, phone: user.phone } };
-    }
-    return { success: false, message: 'Usuário não encontrado para biometria.' };
+ipcMain.handle('auth-login-biometric', async (event, email) => {
+    try {
+        const user = await User.findOne({ email });
+        if (user) {
+            return { success: true, user: { id: user._id.toString(), name: user.name, email: user.email, phone: user.phone } };
+        }
+        return { success: false, message: 'Usuário não encontrado para biometria.' };
+    } catch (e) { return { success: false, message: 'Erro na biometria.' }; }
 });
 
 // Create User (Admin)
-ipcMain.handle('admin-create-user', (event, { name, email, password, phone }) => {
-    const users = authStore.get('users', []);
-    if (users.some(u => u.email === email)) {
-        return { success: false, message: 'Email já cadastrado.' };
-    }
+ipcMain.handle('admin-create-user', async (event, { name, email, password, phone }) => {
+    try {
+        const existing = await User.findOne({ email });
+        if (existing) {
+            return { success: false, message: 'Email já cadastrado.' };
+        }
 
-    const salt = crypto.randomBytes(16).toString('hex');
-    const hash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
+        const salt = crypto.randomBytes(16).toString('hex');
+        const hash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
 
-    const newUser = {
-        id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
-        name,
-        email,
-        phone,
-        salt,
-        hash
-    };
+        const newUser = await User.create({
+            name,
+            email,
+            phone,
+            salt,
+            hash
+        });
 
-    authStore.set('users', [...users, newUser]);
-
-    // Initialize file
-    const newStore = getUserStore(newUser.id);
-    newStore.set({
-        transactions: [],
-        fixedExpenses: [],
-        fixedIncome: [],
-        goals: [],
-        investments: []
-    });
-
-    return { success: true, user: { id: newUser.id, name: newUser.name, email: newUser.email, phone: newUser.phone } };
+        return { success: true, user: { id: newUser._id.toString(), name: newUser.name, email: newUser.email, phone: newUser.phone } };
+    } catch (e) { return { success: false, message: 'Erro ao criar usuário.' }; }
 });
 
 // Update User
-ipcMain.handle('admin-update-user', (event, { id, name, email, password, phone }) => {
-    const users = authStore.get('users', []);
-    const index = users.findIndex(u => u.id === id);
+ipcMain.handle('admin-update-user', async (event, { id, name, email, password, phone }) => {
+    try {
+        const updateData = {};
+        if (name) updateData.name = name;
+        if (email) updateData.email = email;
+        if (phone !== undefined) updateData.phone = phone;
 
-    if (index === -1) return { success: false, message: 'Usuário não encontrado' };
+        if (password) {
+            const salt = crypto.randomBytes(16).toString('hex');
+            const hash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
+            updateData.salt = salt;
+            updateData.hash = hash;
+        }
 
-    const updatedUser = { ...users[index] };
-    if (name) updatedUser.name = name;
-    if (email) updatedUser.email = email;
-    if (phone !== undefined) updatedUser.phone = phone;
-
-    if (password) {
-        const salt = crypto.randomBytes(16).toString('hex');
-        const hash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
-        updatedUser.salt = salt;
-        updatedUser.hash = hash;
-    }
-
-    users[index] = updatedUser;
-    authStore.set('users', users);
-    return { success: true };
+        const result = await User.updateOne({ _id: id }, { $set: updateData });
+        if (result.matchedCount === 0) return { success: false, message: 'Usuário não encontrado' };
+        return { success: true };
+    } catch (e) { return { success: false, message: 'Erro ao atualizar usuário.' }; }
 });
 
 // Delete User
-ipcMain.handle('admin-delete-user', (event, id) => {
-    const users = authStore.get('users', []);
-    const newUsers = users.filter(u => u.id !== id);
-
-    if (users.length === newUsers.length) return false;
-
-    authStore.set('users', newUsers);
-
-    // Initial attempt to delete the file
-    // Electron-store doesn't expose a direct 'deleteFile' easily on the instance without path knowledge or using 'fs'.
-    // But since we use specific names, we can try to clear it or use fs.
+ipcMain.handle('admin-delete-user', async (event, id) => {
     try {
-        const fs = require('fs');
-        // We need to construct the path. Electron-store saves typically in app.getPath('userData').
-        const userDataPath = app.getPath('userData');
-        const filePath = path.join(userDataPath, `user-${id}.json`);
-
-        if (fs.existsSync(filePath)) {
-            fs.unlinkSync(filePath);
-            console.log(`[ADMIN] Deleted user file: ${filePath}`);
-        }
-    } catch (error) {
-        console.error(`[ADMIN] Failed to delete user file for ${id}:`, error);
-    }
-
-    return true;
+        await User.deleteOne({ _id: id });
+        // Also delete related data
+        await Transaction.deleteMany({ userId: id });
+        await FixedExpense.deleteMany({ userId: id });
+        await FixedIncome.deleteMany({ userId: id });
+        await Goal.deleteMany({ userId: id });
+        await Investment.deleteMany({ userId: id });
+        return true;
+    } catch (e) { return false; }
 });
 
 // --- TRAY & WINDOW MANAGEMENT ---
