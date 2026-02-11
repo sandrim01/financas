@@ -352,7 +352,7 @@ app.delete('/api/admin/users/:id', async (req, res) => {
 });
 
 // SPA
-app.get('*', (req, res) => {
+app.get('/{*splat}', (req, res) => {
     res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
