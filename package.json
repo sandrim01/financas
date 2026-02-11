@@ -8,6 +8,7 @@
   "main": "electron/main.js",
   "scripts": {
     "dev": "vite",
+    "start": "node server.js",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
@@ -33,7 +34,9 @@
   },
   "dependencies": {
     "clsx": "^2.1.1",
+    "cors": "^2.8.6",
     "electron-store": "^11.0.2",
+    "express": "^5.2.1",
     "framer-motion": "^12.33.0",
     "jimp": "^1.6.0",
     "jspdf": "^4.1.0",

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import { api } from '../services/api';
 import { LogIn, Lock, Mail, Fingerprint } from 'lucide-react';
 
 export function Login({ onLogin }) {
@@ -43,14 +44,12 @@ export function Login({ onLogin }) {
 
             // If success (no error thrown), we assume authentication passed.
             // Now log in the user by email (trusting the local device auth).
-            if (window.api) {
-                const result = await window.api.loginBiometric(lastEmail);
-                if (result.success) {
-                    onLogin(result.user);
-                    navigate('/');
-                } else {
-                    setError(result.message);
-                }
+            const result = await api.loginBiometric(lastEmail);
+            if (result.success) {
+                onLogin(result.user);
+                navigate('/');
+            } else {
+                setError(result.message);
             }
         } catch (err) {
             console.error(err);
@@ -65,21 +64,17 @@ export function Login({ onLogin }) {
         setError('');
         setLoading(true);
 
-        if (window.api) {
-            try {
-                const result = await window.api.loginUser({ email, password });
-                if (result.success) {
-                    localStorage.setItem('last_user_email', email); // Save for biometric
-                    onLogin(result.user);
-                    navigate('/');
-                } else {
-                    setError(result.message);
-                }
-            } catch (err) {
-                setError('Erro ao conectar com o serviço.');
+        try {
+            const result = await api.loginUser({ email, password });
+            if (result.success) {
+                localStorage.setItem('last_user_email', email); // Save for biometric
+                onLogin(result.user);
+                navigate('/');
+            } else {
+                setError(result.message);
             }
-        } else {
-            setError('Instale o aplicativo Electron para login funcional.');
+        } catch (err) {
+            setError('Erro ao conectar com o serviço.');
         }
         setLoading(false);
     };

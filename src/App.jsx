@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { api } from './services/api';
 import { Sidebar } from './components/Sidebar';
 import { Dashboard } from './pages/Dashboard';
 import { Transactions } from './pages/Transactions';
@@ -21,13 +22,11 @@ function App() {
 
   useEffect(() => {
     const checkAuth = async () => {
-      if (window.api) {
-        try {
-          const exists = await window.api.checkUsersExist();
-          setHasUsers(exists);
-        } catch (e) {
-          console.error("Auth check failed", e);
-        }
+      try {
+        const exists = await api.checkUsersExist();
+        setHasUsers(exists);
+      } catch (e) {
+        console.error("Auth check failed", e);
       }
       setLoading(false);
     };

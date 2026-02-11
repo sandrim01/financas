@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { StatCard } from '../components/StatCard';
 import { FinancialFeed } from '../components/FinancialFeed';
+import { api } from '../services/api';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -157,14 +158,14 @@ export function Dashboard({ user }) {
     };
 
     const load = async () => {
-        if (window.api && user?.id) {
+        if (user?.id) {
             try {
                 const [txData, goalsData, fExpenses, fIncome, mStatus] = await Promise.all([
-                    window.api.getTransactions(user.id).catch(() => []),
-                    window.api.getGoals(user.id).catch(() => []),
-                    window.api.getFixedExpenses(user.id).catch(() => []),
-                    window.api.getFixedIncome(user.id).catch(() => []),
-                    window.api.getMonthlyStatus(user.id).catch(() => ({}))
+                    api.getTransactions(user.id).catch(() => []),
+                    api.getGoals(user.id).catch(() => []),
+                    api.getFixedExpenses(user.id).catch(() => []),
+                    api.getFixedIncome(user.id).catch(() => []),
+                    api.getMonthlyStatus(user.id).catch(() => ({}))
                 ]);
                 setTransactions(Array.isArray(txData) ? txData : []);
                 setGoals(Array.isArray(goalsData) ? goalsData : []);
@@ -176,10 +177,6 @@ export function Dashboard({ user }) {
                 setTransactions([]);
                 setGoals([]);
             }
-        } else {
-            // Mock data fallback if API is not available
-            setTransactions([]);
-            setGoals([]);
         }
     };
 
