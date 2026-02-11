@@ -7,15 +7,28 @@ export function Login({ onLogin }) {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
-    const [loading, setLoading] = useState(false);
-    const [biometryAvailable, setBiometryAvailable] = useState(false);
+    const [stayLoggedIn, setStayLoggedIn] = useState(localStorage.getItem('remember_me') === 'true');
     const navigate = useNavigate();
 
     useEffect(() => {
-        if (window.PublicKeyCredential) {
-            PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()
-                .then(available => setBiometryAvailable(available));
-        }
+        // Check for biometric availability
+        const checkBiometry = async () => {
+            if (window.PublicKeyCredential) {
+                const available = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+                if (available) {
+                    setBiometryAvailable(true);
+                    return;
+                }
+            }
+            // If on Android, our api helper will return availability
+            try {
+                // If we are on Android, we can assume it might be available
+                if (navigator.userAgent.toLowerCase().includes('android')) {
+                    setBiometryAvailable(true);
+                }
+            } catch (e) { }
+        };
+        checkBiometry();
     }, []);
 
     const handleBiometric = async () => {
@@ -27,25 +40,11 @@ export function Login({ onLogin }) {
 
         try {
             setLoading(true);
-            // Request biometric auth (challenge mock)
-            // In a real app we would get a challenge from server. 
-            // Here we just invoke the navigator to trigger Windows Hello UI.
-            // We use a dummy challenge.
-            const challenge = new Uint8Array(32);
-            window.crypto.getRandomValues(challenge);
-
-            await navigator.credentials.get({
-                publicKey: {
-                    challenge,
-                    timeout: 60000,
-                    userVerification: 'required',
-                }
-            });
-
-            // If success (no error thrown), we assume authentication passed.
-            // Now log in the user by email (trusting the local device auth).
             const result = await api.loginBiometric(lastEmail);
             if (result.success) {
+                if (stayLoggedIn) {
+                    localStorage.setItem('user_session', JSON.stringify(result.user));
+                }
                 onLogin(result.user);
                 navigate('/');
             } else {
@@ -53,7 +52,7 @@ export function Login({ onLogin }) {
             }
         } catch (err) {
             console.error(err);
-            setError('Falha na autenticação biométrica ou cancelada.');
+            setError('Falha na autenticação biométrica.');
         } finally {
             setLoading(false);
         }
@@ -67,7 +66,15 @@ export function Login({ onLogin }) {
         try {
             const result = await api.loginUser({ email, password });
             if (result.success) {
-                localStorage.setItem('last_user_email', email); // Save for biometric
+                localStorage.setItem('last_user_email', email);
+                localStorage.setItem('remember_me', stayLoggedIn);
+
+                if (stayLoggedIn) {
+                    localStorage.setItem('user_session', JSON.stringify(result.user));
+                } else {
+                    localStorage.removeItem('user_session');
+                }
+
                 onLogin(result.user);
                 navigate('/');
             } else {
@@ -129,6 +136,17 @@ export function Login({ onLogin }) {
                                 placeholder="••••••••"
                             />
                         </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 mb-2 ml-1">
+                        <input
+                            id="remember"
+                            type="checkbox"
+                            checked={stayLoggedIn}
+                            onChange={e => setStayLoggedIn(e.target.checked)}
+                            className="w-4 h-4 rounded border-slate-800 bg-slate-950 text-emerald-500 focus:ring-emerald-500/50 outline-none cursor-pointer"
+                        />
+                        <label htmlFor="remember" className="text-slate-400 text-sm cursor-pointer select-none">Manter conectado</label>
                     </div>
 
                     <button

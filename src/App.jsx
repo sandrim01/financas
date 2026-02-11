@@ -25,6 +25,15 @@ function App() {
       try {
         const exists = await api.checkUsersExist();
         setHasUsers(exists);
+
+        // Restore session
+        const savedSession = localStorage.getItem('user_session');
+        if (savedSession) {
+          setUser(JSON.parse(savedSession));
+        }
+
+        // Request notification permission
+        await api.requestNotificationPermissions();
       } catch (e) {
         console.error("Auth check failed", e);
       }

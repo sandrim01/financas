@@ -1,8 +1,14 @@
+import { NativeBiometric } from '@capgo/capacitor-native-biometric';
+import { LocalNotifications } from '@capacitor/local-notifications';
+import { Capacitor } from '@capacitor/core';
+
 const PRODUCTION_URL = 'https://conviteinterativo-production.up.railway.app';
 
 const BASE_URL = window.location.origin.includes('localhost:5173')
     ? 'http://localhost:3000'
     : PRODUCTION_URL;
+
+const isAndroid = Capacitor.getPlatform() === 'android';
 
 const fetchAPI = async (path, options = {}) => {
     const url = `${BASE_URL}/api${path}`;
@@ -37,8 +43,60 @@ export const api = {
     loginUser: (data) =>
         window.api ? window.api.loginUser(data) : fetchAPI('/auth/login', { method: 'POST', body: JSON.stringify(data) }),
 
-    loginBiometric: (email) =>
-        window.api ? window.api.loginBiometric(email) : Promise.reject('Biometria não disponível na versão web'),
+    loginBiometric: async (email) => {
+        if (window.api) return window.api.loginBiometric(email);
+
+        if (isAndroid) {
+            try {
+                const result = await NativeBiometric.isAvailable();
+                if (!result.isAvailable) throw new Error('Biometria não disponível');
+
+                await NativeBiometric.verifyIdentity({
+                    reason: "Autenticação para acessar suas finanças",
+                    title: "Login Biométrico",
+                    subtitle: "Use sua digital ou face",
+                    description: "Toque no sensor para entrar",
+                    maxAttempts: 3
+                });
+
+                // Se passou na biometria nativa, chamamos o login por email no servidor
+                return fetchAPI('/auth/login', { method: 'POST', body: JSON.stringify({ email, biometric: true }) });
+            } catch (e) {
+                console.error('Android Biometric Error:', e);
+                throw e;
+            }
+        }
+
+        return Promise.reject('Biometria não disponível nesta versão');
+    },
+
+    // Notifications
+    requestNotificationPermissions: async () => {
+        if (isAndroid) {
+            const perm = await LocalNotifications.requestPermissions();
+            return perm.display === 'granted';
+        }
+        return false;
+    },
+
+    scheduleNotification: async (id, title, body, date) => {
+        if (isAndroid) {
+            await LocalNotifications.schedule({
+                notifications: [
+                    {
+                        title,
+                        body,
+                        id,
+                        schedule: { at: date },
+                        sound: null,
+                        attachments: null,
+                        actionTypeId: "",
+                        extra: null
+                    }
+                ]
+            });
+        }
+    },
 
     // Transactions
     getTransactions: (userId) =>

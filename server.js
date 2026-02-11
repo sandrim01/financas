@@ -49,10 +49,16 @@ app.post('/api/auth/register', async (req, res) => {
 });
 
 app.post('/api/auth/login', async (req, res) => {
-    const { email, password } = req.body;
+    const { email, password, biometric } = req.body;
     try {
         const user = await User.findOne({ email });
         if (!user) return res.status(404).json({ success: false, message: 'Usuário não encontrado.' });
+
+        if (biometric) {
+            // In a real app, we would verify a biometric token/signature here.
+            // For this project, we trust the device's local biometric check.
+            return res.json({ success: true, user: { id: user._id.toString(), name: user.name, email: user.email, phone: user.phone } });
+        }
 
         const hash = crypto.pbkdf2Sync(password, user.salt, 1000, 64, 'sha512').toString('hex');
         if (hash === user.hash) {

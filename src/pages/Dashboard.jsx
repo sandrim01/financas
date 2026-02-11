@@ -200,10 +200,25 @@ export function Dashboard({ user }) {
             const bills = transactions.filter(t => {
                 if (t.type !== 'expense') return false;
                 const tDate = new Date(t.date);
-                // Check if due in the future but within 7 days
                 return tDate >= now && tDate <= nextWeek;
             });
             setUpcomingBills(bills);
+
+            // Schedule local notifications for these bills
+            bills.forEach(bill => {
+                const dueDate = new Date(bill.date);
+                // Set notification for 9am on the due date
+                dueDate.setHours(9, 0, 0, 0);
+
+                if (dueDate > now) {
+                    api.scheduleNotification(
+                        Math.abs(bill.id.split('').reduce((a, b) => (a << 5) - a + b.charCodeAt(0), 0)), // unique numeric id
+                        `Fatura Vencendo: ${bill.title}`,
+                        `Lembrete: Sua conta de ${Number(bill.amount).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} vence hoje.`,
+                        dueDate
+                    );
+                }
+            });
         }
     }, [transactions]);
 
