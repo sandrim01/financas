@@ -13,14 +13,14 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Serve static files from the 'dist' directory
-app.use(express.static(path.join(__dirname, 'dist')));
-
 const MONGO_URI = 'mongodb://mongo:gOvpEUyQmhOMmddioVtdHlNCSPWyxhzh@turntable.proxy.rlwy.net:26312';
 
 mongoose.connect(MONGO_URI)
     .then(() => console.log('[SERVER] Connected to MongoDB'))
     .catch(err => console.error('[SERVER] Connection Error:', err));
+
+// Test Endpoint
+app.get('/health', (req, res) => res.json({ status: 'ok', time: new Date() }));
 
 // Auth Endpoints
 app.get('/api/auth/check', async (req, res) => {
@@ -29,6 +29,9 @@ app.get('/api/auth/check', async (req, res) => {
         res.json(count > 0);
     } catch (e) { res.status(500).json(false); }
 });
+
+// Serve static files AFTER API routes
+app.use(express.static(path.join(__dirname, 'dist')));
 
 app.post('/api/auth/register', async (req, res) => {
     const { name, email, password, phone } = req.body;

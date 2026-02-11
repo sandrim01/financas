@@ -5,18 +5,25 @@ const BASE_URL = window.location.origin.includes('localhost:5173')
     : PRODUCTION_URL;
 
 const fetchAPI = async (path, options = {}) => {
-    const response = await fetch(`${BASE_URL}/api${path}`, {
-        ...options,
-        headers: {
-            'Content-Type': 'application/json',
-            ...options.headers,
-        },
-    });
-    if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        throw new Error(err.message || 'API Error');
+    const url = `${BASE_URL}/api${path}`;
+    console.log(`[API] Fetching: ${url}`);
+    try {
+        const response = await fetch(url, {
+            ...options,
+            headers: {
+                'Content-Type': 'application/json',
+                ...options.headers,
+            },
+        });
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.message || `API Error ${response.status}`);
+        }
+        return response.json();
+    } catch (e) {
+        console.error(`[API] Fetch Error for ${url}:`, e);
+        throw e;
     }
-    return response.json();
 };
 
 export const api = {
